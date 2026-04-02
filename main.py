@@ -1,83 +1,20 @@
-"""Real-time posture detection for sports training and rehabilitation.
-
-Run:
-    python main.py
-
-Controls:
-- q: Quit
-- c: Calibrate current body posture as ideal reference
-"""
+"""Phase-1 local posture checker (webcam window + calibration)."""
 
 from __future__ import annotations
 
 import csv
-import os
 import time
 from collections import defaultdict
 from datetime import datetime
+from pathlib import Path
 from typing import Dict, List, Tuple
 
 import cv2
-import numpy as np
 
-from angle_utils import (
-    calculate_angle,
-    calculate_pair_vertical_diff_ratio,
-    evaluate_metric,
-    smooth_value,
-)
+from angle_utils import calculate_angle, calculate_pair_vertical_diff_ratio, smooth_value
 from pose_detector import PoseDetector
 
 Point = Tuple[int, int]
-
-
-# Configurable threshold dictionary for posture correctness.
-THRESHOLDS = {
-    "left_elbow": {
-        "min": 155,
-        "max": 180,
-        "low_msg": "Straighten your left elbow",
-        "high_msg": "Do not hyperextend left elbow",
-    },
-    "right_elbow": {
-        "min": 155,
-        "max": 180,
-        "low_msg": "Straighten your right elbow",
-        "high_msg": "Do not hyperextend right elbow",
-    },
-    "left_knee": {
-        "min": 160,
-        "max": 180,
-        "low_msg": "Straighten your left knee",
-        "high_msg": "Avoid locking left knee",
-    },
-    "right_knee": {
-        "min": 160,
-        "max": 180,
-        "low_msg": "Straighten your right knee",
-        "high_msg": "Avoid locking right knee",
-    },
-    "shoulder_alignment": {
-        "min": 0.0,
-        "max": 0.03,
-        "high_msg": "Level your shoulders",
-    },
-    "hip_alignment": {
-        "min": 0.0,
-        "max": 0.035,
-        "high_msg": "Level your hips",
-    },
-}
-
-
-def ensure_output_paths() -> Tuple[str, str]:
-    """Create output paths for video and CSV logs."""
-    os.makedirs("output", exist_ok=True)
-    stamp = datetime.now().strftime("%Y%m%d_%H%M%S")
-    video_path = os.path.join("output", f"posture_session_{stamp}.mp4")
-    csv_path = os.path.join("output", f"posture_metrics_{stamp}.csv")
-    return video_path, csv_path
-
 
 METRIC_REQUIREMENTS = {
     "left_elbow": ("LEFT_SHOULDER", "LEFT_ELBOW", "LEFT_WRIST"),
@@ -88,29 +25,43 @@ METRIC_REQUIREMENTS = {
     "hip_alignment": ("LEFT_HIP", "RIGHT_HIP"),
 }
 
+CALIBRATION_TOLERANCE = {
+    "left_elbow": 15.0,
+    "right_elbow": 15.0,
+    "left_knee": 15.0,
+    "right_knee": 15.0,
+    "shoulder_alignment": 0.03,
+    "hip_alignment": 0.035,
+}
 
-def has_any_required_points(lms: Dict[str, Point]) -> bool:
-    required = {
-        "LEFT_SHOULDER",
-        "RIGHT_SHOULDER",
-        "LEFT_ELBOW",
-        "RIGHT_ELBOW",
-        "LEFT_WRIST",
-        "RIGHT_WRIST",
-        "LEFT_HIP",
-        "RIGHT_HIP",
-        "LEFT_KNEE",
-        "RIGHT_KNEE",
-        "LEFT_ANKLE",
-        "RIGHT_ANKLE",
-    }
-    return any(k in lms for k in required)
+IMPROVEMENT_TEXT = {
+    "left_elbow": "Adjust left elbow angle",
+    "right_elbow": "Adjust right elbow angle",
+    "left_knee": "Adjust left knee angle",
+    "right_knee": "Adjust right knee angle",
+    "shoulder_alignment": "Level your shoulders",
+    "hip_alignment": "Level your hips",
+}
+
+
+def get_tracked_finger_tips(lms: Dict[str, Point]) -> List[str]:
+    finger_keys = [
+        "LHAND_THUMB_TIP",
+        "LHAND_INDEX_FINGER_TIP",
+        "LHAND_MIDDLE_FINGER_TIP",
+        "LHAND_RING_FINGER_TIP",
+        "LHAND_PINKY_TIP",
+        "RHAND_THUMB_TIP",
+        "RHAND_INDEX_FINGER_TIP",
+        "RHAND_MIDDLE_FINGER_TIP",
+        "RHAND_RING_FINGER_TIP",
+        "RHAND_PINKY_TIP",
+    ]
+    return [key for key in finger_keys if key in lms]
 
 
 def compute_metrics(lms: Dict[str, Point], frame_h: int) -> Dict[str, float]:
-    """Compute only those metrics whose required landmarks are currently visible."""
     metrics: Dict[str, float] = {}
-
     if all(name in lms for name in METRIC_REQUIREMENTS["left_elbow"]):
         metrics["left_elbow"] = calculate_angle(lms["LEFT_SHOULDER"], lms["LEFT_ELBOW"], lms["LEFT_WRIST"])
     if all(name in lms for name in METRIC_REQUIREMENTS["right_elbow"]):
@@ -124,253 +75,272 @@ def compute_metrics(lms: Dict[str, Point], frame_h: int) -> Dict[str, float]:
             lms["LEFT_SHOULDER"], lms["RIGHT_SHOULDER"], frame_h
         )
     if all(name in lms for name in METRIC_REQUIREMENTS["hip_alignment"]):
-        metrics["hip_alignment"] = calculate_pair_vertical_diff_ratio(
-            lms["LEFT_HIP"], lms["RIGHT_HIP"], frame_h
-        )
+        metrics["hip_alignment"] = calculate_pair_vertical_diff_ratio(lms["LEFT_HIP"], lms["RIGHT_HIP"], frame_h)
     return metrics
 
 
-def evaluate_posture(metrics: Dict[str, float]) -> Tuple[bool, List[str], Dict[str, bool]]:
-    """Evaluate metrics against thresholds and return feedback."""
-    feedback = []
+def evaluate_against_baseline(metrics: Dict[str, float], baseline: Dict[str, float]) -> Tuple[bool, List[str], Dict[str, bool]]:
+    if not baseline:
+        return False, ["Press 'c' to calibrate ideal posture"], {}
+
     each_ok: Dict[str, bool] = {}
+    feedback: List[str] = []
+    for key, current in metrics.items():
+        if key not in baseline:
+            continue
+        tolerance = CALIBRATION_TOLERANCE[key]
+        is_ok = abs(current - baseline[key]) <= tolerance
+        each_ok[key] = is_ok
+        if not is_ok:
+            feedback.append(IMPROVEMENT_TEXT[key])
 
-    if not metrics:
-        return False, ["Move a bit more into frame to evaluate posture"], each_ok
-
-    for key, value in metrics.items():
-        ok, msg = evaluate_metric(value, THRESHOLDS[key])
-        each_ok[key] = ok
-        if not ok and msg:
-            feedback.append(msg)
-
+    if not each_ok:
+        return False, ["Unable to compute posture metrics"], each_ok
     return all(each_ok.values()), feedback, each_ok
 
 
-def draw_metric_text(frame: np.ndarray, lms: Dict[str, Point], metrics: Dict[str, float], each_ok: Dict[str, bool]) -> None:
-    """Draw angle and alignment values near related joints."""
-    metric_positions: Dict[str, Point] = {}
+def draw_ui(
+    frame,
+    lms: Dict[str, Point],
+    metrics: Dict[str, float],
+    each_ok: Dict[str, bool],
+    posture_ok: bool,
+    feedback: List[str],
+    calibrated: bool,
+    fps: float,
+    tracked_fingers: List[str],
+) -> None:
+    h, w = frame.shape[:2]
+    state = "POSTURE: CORRECT" if posture_ok else "POSTURE: WRONG"
+    state_color = (0, 255, 0) if posture_ok else (0, 0, 255)
+    cv2.putText(frame, state, (20, 35), cv2.FONT_HERSHEY_SIMPLEX, 0.85, state_color, 2, cv2.LINE_AA)
+    cv2.putText(frame, f"FPS: {fps:.1f}", (w - 130, 35), cv2.FONT_HERSHEY_SIMPLEX, 0.65, (255, 255, 0), 2, cv2.LINE_AA)
+
+    calibration_text = "CALIBRATED" if calibrated else "NOT CALIBRATED (press c)"
+    cv2.putText(frame, calibration_text, (20, 63), cv2.FONT_HERSHEY_SIMPLEX, 0.58, (255, 255, 255), 2, cv2.LINE_AA)
+    cv2.putText(
+        frame,
+        f"Fingers tracked: {len(tracked_fingers)}/10",
+        (w - 240, 63),
+        cv2.FONT_HERSHEY_SIMPLEX,
+        0.58,
+        (255, 255, 255),
+        2,
+        cv2.LINE_AA,
+    )
+
+    y = 90
+    for msg in feedback[:3]:
+        cv2.putText(frame, msg, (20, y), cv2.FONT_HERSHEY_SIMPLEX, 0.58, (0, 90, 255), 2, cv2.LINE_AA)
+        y += 26
+
+    positions: Dict[str, Point] = {}
     if "LEFT_ELBOW" in lms:
-        metric_positions["left_elbow"] = lms["LEFT_ELBOW"]
+        positions["left_elbow"] = lms["LEFT_ELBOW"]
     if "RIGHT_ELBOW" in lms:
-        metric_positions["right_elbow"] = lms["RIGHT_ELBOW"]
+        positions["right_elbow"] = lms["RIGHT_ELBOW"]
     if "LEFT_KNEE" in lms:
-        metric_positions["left_knee"] = lms["LEFT_KNEE"]
+        positions["left_knee"] = lms["LEFT_KNEE"]
     if "RIGHT_KNEE" in lms:
-        metric_positions["right_knee"] = lms["RIGHT_KNEE"]
+        positions["right_knee"] = lms["RIGHT_KNEE"]
     if "LEFT_SHOULDER" in lms and "RIGHT_SHOULDER" in lms:
-        metric_positions["shoulder_alignment"] = (
+        positions["shoulder_alignment"] = (
             (lms["LEFT_SHOULDER"][0] + lms["RIGHT_SHOULDER"][0]) // 2,
             min(lms["LEFT_SHOULDER"][1], lms["RIGHT_SHOULDER"][1]) - 15,
         )
     if "LEFT_HIP" in lms and "RIGHT_HIP" in lms:
-        metric_positions["hip_alignment"] = (
+        positions["hip_alignment"] = (
             (lms["LEFT_HIP"][0] + lms["RIGHT_HIP"][0]) // 2,
             min(lms["LEFT_HIP"][1], lms["RIGHT_HIP"][1]) - 15,
         )
 
-    for name, value in metrics.items():
-        if name not in metric_positions:
+    for metric_name, metric_val in metrics.items():
+        if metric_name in {"left_elbow", "right_elbow", "left_knee", "right_knee"}:
             continue
-        pos = metric_positions[name]
-        color = (0, 255, 0) if each_ok.get(name, False) else (0, 0, 255)
-        suffix = "deg" if "alignment" not in name else "ratio"
-        text = f"{name}: {value:.1f} {suffix}" if suffix == "deg" else f"{name}: {value:.3f}"
+        if metric_name not in positions:
+            continue
+        pos = positions[metric_name]
+        ok = each_ok.get(metric_name, True)
+        color = (0, 255, 0) if ok else (0, 0, 255)
+        if "alignment" in metric_name:
+            text = f"{metric_name}: {metric_val:.3f}"
+        else:
+            text = f"{metric_name}: {metric_val:.1f} deg"
+        cv2.putText(frame, text, (int(pos[0]) + 6, int(pos[1]) - 6), cv2.FONT_HERSHEY_SIMPLEX, 0.45, color, 1, cv2.LINE_AA)
 
-        cv2.putText(
-            frame,
-            text,
-            (int(pos[0]) + 8, int(pos[1]) - 8),
-            cv2.FONT_HERSHEY_SIMPLEX,
-            0.45,
-            color,
-            1,
-            cv2.LINE_AA,
-        )
+    cv2.putText(frame, "c: calibrate  q: quit", (20, h - 20), cv2.FONT_HERSHEY_SIMPLEX, 0.55, (230, 230, 230), 2, cv2.LINE_AA)
 
 
-def draw_feedback(frame: np.ndarray, posture_ok: bool, feedback: List[str], fps: float) -> None:
-    """Render posture state, dynamic feedback, and FPS."""
-    h, w = frame.shape[:2]
-    state_text = "POSTURE: CORRECT" if posture_ok else "POSTURE: INCORRECT"
-    state_color = (0, 255, 0) if posture_ok else (0, 0, 255)
+def draw_joint_angles(frame, lms: Dict[str, Point], metrics: Dict[str, float], each_ok: Dict[str, bool]) -> None:
+    """Draw elbow and knee angles with highlighted marker, rays, and degree text."""
+    overlay = frame.copy()
+    joints = [
+        ("left_elbow", "LEFT_SHOULDER", "LEFT_ELBOW", "LEFT_WRIST"),
+        ("right_elbow", "RIGHT_SHOULDER", "RIGHT_ELBOW", "RIGHT_WRIST"),
+        ("left_knee", "LEFT_HIP", "LEFT_KNEE", "LEFT_ANKLE"),
+        ("right_knee", "RIGHT_HIP", "RIGHT_KNEE", "RIGHT_ANKLE"),
+    ]
 
-    cv2.putText(frame, state_text, (20, 35), cv2.FONT_HERSHEY_SIMPLEX, 0.9, state_color, 2, cv2.LINE_AA)
-    cv2.putText(frame, f"FPS: {fps:.1f}", (w - 140, 35), cv2.FONT_HERSHEY_SIMPLEX, 0.7, (255, 255, 0), 2, cv2.LINE_AA)
+    for metric_name, a_name, b_name, c_name in joints:
+        if metric_name not in metrics:
+            continue
+        if not all(name in lms for name in (a_name, b_name, c_name)):
+            continue
 
-    y = 65
-    if not posture_ok:
-        for msg in feedback[:4]:
-            cv2.putText(frame, msg, (20, y), cv2.FONT_HERSHEY_SIMPLEX, 0.6, (20, 20, 255), 2, cv2.LINE_AA)
-            y += 28
+        ax, ay = lms[a_name]
+        bx, by = lms[b_name]
+        cx, cy = lms[c_name]
 
+        # Ray colors mimic the reference style.
+        cv2.line(frame, (bx, by), (ax, ay), (0, 255, 255), 3, cv2.LINE_AA)
+        cv2.line(frame, (bx, by), (cx, cy), (120, 255, 120), 3, cv2.LINE_AA)
 
-def init_csv(csv_path: str) -> None:
-    """Initialize posture-metrics CSV file."""
-    with open(csv_path, "w", newline="", encoding="utf-8") as f:
-        writer = csv.writer(f)
-        writer.writerow(
-            [
-                "timestamp",
-                "left_elbow",
-                "right_elbow",
-                "left_knee",
-                "right_knee",
-                "shoulder_alignment",
-                "hip_alignment",
-                "posture_ok",
-            ]
-        )
+        cv2.circle(overlay, (bx, by), 38, (0, 220, 255), -1)
+        cv2.circle(frame, (bx, by), 6, (0, 0, 255), -1)
 
+        # Display reflex-style angle like 295 deg from the sample.
+        display_angle = int(round(360.0 - metrics[metric_name]))
+        display_angle = display_angle % 360
+        if display_angle == 0:
+            display_angle = 360
 
-def append_csv(csv_path: str, metrics: Dict[str, float], posture_ok: bool) -> None:
-    """Append one frame's metrics for later analysis."""
-    with open(csv_path, "a", newline="", encoding="utf-8") as f:
-        writer = csv.writer(f)
-        writer.writerow(
-            [
-                datetime.now().isoformat(timespec="milliseconds"),
-                f"{metrics['left_elbow']:.2f}" if "left_elbow" in metrics else "",
-                f"{metrics['right_elbow']:.2f}" if "right_elbow" in metrics else "",
-                f"{metrics['left_knee']:.2f}" if "left_knee" in metrics else "",
-                f"{metrics['right_knee']:.2f}" if "right_knee" in metrics else "",
-                f"{metrics['shoulder_alignment']:.4f}" if "shoulder_alignment" in metrics else "",
-                f"{metrics['hip_alignment']:.4f}" if "hip_alignment" in metrics else "",
-                int(posture_ok),
-            ]
-        )
+        text = f"{display_angle} deg"
+        text_x = bx - 20
+        text_y = by + 8
+        cv2.putText(frame, text, (text_x + 1, text_y + 1), cv2.FONT_HERSHEY_SIMPLEX, 0.72, (0, 0, 0), 3, cv2.LINE_AA)
+        angle_ok = each_ok.get(metric_name, False)
+        text_color = (255, 255, 255) if angle_ok else (240, 240, 255)
+        cv2.putText(frame, text, (text_x, text_y), cv2.FONT_HERSHEY_SIMPLEX, 0.72, text_color, 2, cv2.LINE_AA)
+
+    cv2.addWeighted(overlay, 0.32, frame, 0.68, 0, frame)
 
 
-def main() -> None:
-    detector = PoseDetector(
-        model_complexity=1,
-        min_detection_confidence=0.6,
-        min_tracking_confidence=0.6,
-    )
+def build_output_paths() -> Tuple[Path, Path]:
+    out_dir = Path("output")
+    out_dir.mkdir(parents=True, exist_ok=True)
+    stamp = datetime.now().strftime("%Y%m%d_%H%M%S")
+    return out_dir / f"posture_{stamp}.mp4", out_dir / f"metrics_{stamp}.csv"
 
+
+def run_phase_1() -> None:
     cap = cv2.VideoCapture(0)
     if not cap.isOpened():
-        raise RuntimeError("Could not open webcam. Check camera permissions/device.")
+        print("Error: Could not open webcam. Check camera permissions/device.")
+        return
 
-    # Lower capture resolution to improve real-time FPS on modest hardware.
     cap.set(cv2.CAP_PROP_FRAME_WIDTH, 960)
     cap.set(cv2.CAP_PROP_FRAME_HEIGHT, 540)
 
-    width = int(cap.get(cv2.CAP_PROP_FRAME_WIDTH)) or 960
-    height = int(cap.get(cv2.CAP_PROP_FRAME_HEIGHT)) or 540
-    fps_in = cap.get(cv2.CAP_PROP_FPS)
-    out_fps = fps_in if fps_in and fps_in > 1 else 30.0
+    detector = PoseDetector(model_complexity=1, min_detection_confidence=0.6, min_tracking_confidence=0.6)
+    histories: Dict[str, List[float]] = defaultdict(list)
+    baseline: Dict[str, float] = {}
+    ideal_lms: Dict[str, Point] = {}
 
-    video_path, csv_path = ensure_output_paths()
-    init_csv(csv_path)
+    video_path, csv_path = build_output_paths()
+    fps = cap.get(cv2.CAP_PROP_FPS)
+    if fps <= 0:
+        fps = 25.0
+    width = int(cap.get(cv2.CAP_PROP_FRAME_WIDTH))
+    height = int(cap.get(cv2.CAP_PROP_FRAME_HEIGHT))
+    writer = cv2.VideoWriter(str(video_path), cv2.VideoWriter_fourcc(*"mp4v"), fps, (width, height))
 
-    fourcc = cv2.VideoWriter_fourcc(*"mp4v")
-    writer = cv2.VideoWriter(video_path, fourcc, out_fps, (width, height))
-
-    ideal_landmarks: Dict[str, Point] = {}
-
-    # Moving-average smoothing history by metric name.
-    smooth_histories: Dict[str, List[float]] = defaultdict(list)
+    csv_file = csv_path.open("w", newline="", encoding="utf-8")
+    csv_writer = csv.writer(csv_file)
+    csv_writer.writerow(
+        [
+            "timestamp",
+            "left_elbow",
+            "right_elbow",
+            "left_knee",
+            "right_knee",
+            "shoulder_alignment",
+            "hip_alignment",
+            "posture_ok",
+            "feedback",
+        ]
+    )
 
     prev_time = time.perf_counter()
 
-    print("Controls: press 'c' to calibrate ideal posture, 'q' to quit.")
-    print(f"Recording output video to: {video_path}")
-    print(f"Saving posture metrics to: {csv_path}")
+    try:
+        while True:
+            ok, frame = cap.read()
+            if not ok:
+                print("Warning: Failed to read frame from webcam.")
+                break
 
-    frame_idx = 0
-    while True:
-        ok, frame = cap.read()
-        if not ok:
-            break
+            frame = cv2.flip(frame, 1)
+            results = detector.process(frame)
+            lms = detector.get_landmark_dict(results, frame.shape, visibility_threshold=0.45)
 
-        frame = cv2.flip(frame, 1)
+            posture_ok = False
+            feedback = ["Move into camera view (half body is okay)"]
+            each_ok: Dict[str, bool] = {}
+            metrics: Dict[str, float] = {}
+            tracked_fingers = get_tracked_finger_tips(lms)
 
-        results = detector.process(frame)
-        lms = detector.get_landmark_dict(results, frame.shape, visibility_threshold=0.45)
+            raw_metrics = compute_metrics(lms, frame.shape[0])
+            for key, val in raw_metrics.items():
+                metrics[key] = smooth_value(histories[key], val, window=5)
 
-        posture_ok = False
-        feedback: List[str] = []
-        each_ok: Dict[str, bool] = {}
-        metrics: Dict[str, float] = {}
-
-        if has_any_required_points(lms):
-            raw_metrics = compute_metrics(lms, frame_h=frame.shape[0])
-
-            # Smooth metrics to reduce noisy per-frame jitter.
-            for key, value in raw_metrics.items():
-                metrics[key] = smooth_value(smooth_histories[key], value, window=5)
-
-            posture_ok, feedback, each_ok = evaluate_posture(metrics)
-
-            detector.draw_styled_skeleton(frame, results, posture_correct=posture_ok)
             if metrics:
-                draw_metric_text(frame, lms, metrics, each_ok)
+                posture_ok, feedback, each_ok = evaluate_against_baseline(metrics, baseline)
+                detector.draw_styled_skeleton(frame, results, posture_correct=posture_ok)
+            else:
+                detector.draw_styled_skeleton(frame, results, posture_correct=False)
 
-            if not posture_ok and metrics:
-                detector.draw_ideal_overlay(frame, lms, ideal_landmarks)
+            if baseline and not posture_ok and ideal_lms:
+                detector.draw_ideal_overlay(frame, ideal_lms)
 
-            # Save every 3rd frame to reduce disk overhead and keep real-time speed.
-            if frame_idx % 3 == 0 and metrics:
-                append_csv(csv_path, metrics, posture_ok)
-        else:
-            cv2.putText(
-                frame,
-                "No valid body points found. Move into camera view",
-                (20, 70),
-                cv2.FONT_HERSHEY_SIMPLEX,
-                0.7,
-                (0, 0, 255),
-                2,
-                cv2.LINE_AA,
+            draw_joint_angles(frame, lms, metrics, each_ok)
+
+            if tracked_fingers:
+                short_names = [
+                    key.replace("LHAND_", "L-").replace("RHAND_", "R-").replace("_FINGER", "")
+                    for key in tracked_fingers[:3]
+                ]
+                feedback.append("Tracking fingers: " + ", ".join(short_names))
+
+            now = time.perf_counter()
+            dt = max(1e-6, now - prev_time)
+            display_fps = 1.0 / dt
+            prev_time = now
+
+            draw_ui(frame, lms, metrics, each_ok, posture_ok, feedback, bool(baseline), display_fps, tracked_fingers)
+            writer.write(frame)
+
+            csv_writer.writerow(
+                [
+                    datetime.now().isoformat(timespec="milliseconds"),
+                    round(metrics.get("left_elbow", 0.0), 3),
+                    round(metrics.get("right_elbow", 0.0), 3),
+                    round(metrics.get("left_knee", 0.0), 3),
+                    round(metrics.get("right_knee", 0.0), 3),
+                    round(metrics.get("shoulder_alignment", 0.0), 5),
+                    round(metrics.get("hip_alignment", 0.0), 5),
+                    int(posture_ok),
+                    " | ".join(feedback),
+                ]
             )
 
-        # FPS estimation.
-        current_time = time.perf_counter()
-        dt = max(1e-6, current_time - prev_time)
-        fps = 1.0 / dt
-        prev_time = current_time
+            cv2.imshow("Phase-1 Posture Detection", frame)
+            key = cv2.waitKey(1) & 0xFF
+            if key == ord("q"):
+                break
+            if key == ord("c") and metrics:
+                baseline.update(metrics)
+                ideal_lms.update(lms)
+                print("Calibration updated from currently visible body points.")
 
-        draw_feedback(frame, posture_ok, feedback, fps)
-
-        cv2.putText(
-            frame,
-            "Press C: Calibrate ideal posture | Press Q: Quit",
-            (20, height - 18),
-            cv2.FONT_HERSHEY_SIMPLEX,
-            0.55,
-            (255, 255, 255),
-            1,
-            cv2.LINE_AA,
-        )
-
-        writer.write(frame)
-        cv2.imshow("Real-Time Human Posture Detection", frame)
-
-        key = cv2.waitKey(1) & 0xFF
-        if key == ord("q"):
-            break
-        if key == ord("c") and has_any_required_points(lms):
-            # Calibration: save current posture as ideal reference overlay.
-            ideal_landmarks = dict(lms)
-            cv2.putText(
-                frame,
-                "Calibration saved",
-                (20, 105),
-                cv2.FONT_HERSHEY_SIMPLEX,
-                0.8,
-                (0, 255, 0),
-                2,
-                cv2.LINE_AA,
-            )
-
-        frame_idx += 1
-
-    cap.release()
-    writer.release()
-    detector.close()
-    cv2.destroyAllWindows()
+    finally:
+        csv_file.close()
+        writer.release()
+        cap.release()
+        detector.close()
+        cv2.destroyAllWindows()
+        print(f"Saved video: {video_path}")
+        print(f"Saved metrics CSV: {csv_path}")
 
 
 if __name__ == "__main__":
-    main()
+    run_phase_1()

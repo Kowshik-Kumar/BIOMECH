@@ -1,0 +1,22 @@
+# Python
+__pycache__/
+*.py[cod]
+*.pyo
+*.pyd
+*.so
+.venv/
+
+# Editor / OS
+.vscode/
+.DS_Store
+Thumbs.db
+
+# Next.js / Node
+frontend/node_modules/
+frontend/.next/
+
+# Runtime output artifacts
+output/*.mp4
+output/metrics_*.csv
+output/posture_metrics_*.csv
+output/posture_session_*.mp4
