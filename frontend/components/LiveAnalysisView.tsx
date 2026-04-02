@@ -30,7 +30,7 @@ export default function LiveAnalysisView({
   return (
     <main className="min-h-screen bg-hero-mesh px-4 py-6 sm:px-6 md:px-10">
       <div className="mx-auto max-w-7xl">
-        <Link href={backHref} className="inline-flex items-center gap-2 text-sm text-slate-300 transition hover:text-cyan-200">
+        <Link href={backHref} className="inline-flex items-center gap-2 text-sm text-slate-300 transition hover:text-amber-200">
           <ChevronLeft size={16} /> Back
         </Link>
         <h1 className="mt-4 font-[var(--font-sora)] text-3xl font-bold text-slate-100">{title}</h1>

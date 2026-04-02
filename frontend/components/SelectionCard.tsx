@@ -16,7 +16,7 @@ export default function SelectionCard({ title, description, href, accent }: Sele
       <p className="mt-3 text-sm leading-6 text-slate-300">{description}</p>
       <Link
         href={href}
-        className="mt-8 inline-flex items-center gap-2 rounded-xl border border-slate-500/60 bg-slate-900/70 px-4 py-2 text-sm font-semibold text-cyan-200 transition hover:border-cyan-300 hover:text-cyan-100"
+        className="mt-8 inline-flex items-center gap-2 rounded-xl border border-slate-500/60 bg-slate-900/70 px-4 py-2 text-sm font-semibold text-amber-200 transition hover:border-amber-300 hover:text-amber-100"
       >
         Enter Module
         <ArrowRight size={16} />

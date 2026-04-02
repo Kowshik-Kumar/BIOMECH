@@ -22,7 +22,7 @@ type ProgressPanelProps = {
 export default function ProgressPanel({ data }: ProgressPanelProps) {
   return (
     <section className="glass-card rounded-2xl p-5">
-      <h3 className="font-[var(--font-sora)] text-sm font-semibold uppercase tracking-[0.16em] text-cyan-200">Progress</h3>
+      <h3 className="font-[var(--font-sora)] text-sm font-semibold uppercase tracking-[0.16em] text-amber-200">Progress</h3>
       <div className="mt-4 h-64 rounded-xl border border-slate-600/60 bg-slate-900/40 p-2">
         <ResponsiveContainer width="100%" height="100%">
           <LineChart data={data}>
@@ -36,9 +36,9 @@ export default function ProgressPanel({ data }: ProgressPanelProps) {
                 borderRadius: "10px",
               }}
             />
-            <Line type="monotone" dataKey="kneeAngle" stroke="#22d3ee" strokeWidth={2} dot={false} />
-            <Line type="monotone" dataKey="pelvisTilt" stroke="#f97316" strokeWidth={2} dot={false} />
-            <Line type="monotone" dataKey="elbowAngle" stroke="#86efac" strokeWidth={2} dot={false} />
+            <Line type="monotone" dataKey="kneeAngle" stroke="#f59e0b" strokeWidth={2} dot={false} />
+            <Line type="monotone" dataKey="pelvisTilt" stroke="#eab308" strokeWidth={2} dot={false} />
+            <Line type="monotone" dataKey="elbowAngle" stroke="#84cc16" strokeWidth={2} dot={false} />
           </LineChart>
         </ResponsiveContainer>
       </div>

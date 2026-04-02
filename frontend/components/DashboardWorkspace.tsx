@@ -14,7 +14,7 @@ function OverviewCard({ title, description, href, cta }: OverviewCardProps) {
       <p className="mt-2 text-sm leading-6 text-slate-300">{description}</p>
       <Link
         href={href}
-        className="mt-4 inline-flex rounded-md border border-cyan-500/40 bg-cyan-500/10 px-3 py-1.5 text-xs font-semibold text-cyan-200 transition hover:border-cyan-400 hover:bg-cyan-500/20"
+        className="mt-4 inline-flex rounded-md border border-amber-500/40 bg-amber-500/10 px-3 py-1.5 text-xs font-semibold text-amber-200 transition hover:border-amber-400 hover:bg-amber-500/20"
       >
         {cta}
       </Link>

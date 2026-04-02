@@ -91,7 +91,7 @@ export default function LiveCameraFeed({ label }: LiveCameraFeedProps) {
 
   return (
     <section className="glass-card relative min-h-[320px] overflow-hidden rounded-2xl p-5 md:min-h-[520px]">
-      <div className="absolute inset-0 bg-gradient-to-br from-cyan-400/10 via-transparent to-emerald-400/10" />
+      <div className="absolute inset-0 bg-gradient-to-br from-amber-400/15 via-transparent to-lime-400/10" />
       <div className="relative flex h-full flex-col justify-between">
         <div className="flex items-center justify-between">
           <p className="font-[var(--font-sora)] text-sm font-semibold text-slate-100">{label}</p>
@@ -105,7 +105,7 @@ export default function LiveCameraFeed({ label }: LiveCameraFeedProps) {
               <img src={streamUrl} alt="Live posture camera feed" className="h-full w-full object-cover" />
             ) : (
               <div className="px-8 py-10 text-center">
-                <Camera size={34} className="mx-auto text-cyan-300" />
+                <Camera size={34} className="mx-auto text-amber-300" />
                 <p className="mt-4 text-sm text-slate-300">Camera stream unavailable</p>
                 <p className="mt-1 text-xs text-slate-400">Start backend with: python camera_api.py</p>
               </div>
@@ -131,7 +131,7 @@ export default function LiveCameraFeed({ label }: LiveCameraFeedProps) {
                 type="button"
                 onClick={() => void handleCalibrate()}
                 disabled={!isHealthy || isCalibrating}
-                className="inline-flex items-center gap-2 rounded-lg border border-cyan-300/40 bg-cyan-400/20 px-3 py-2 text-xs font-semibold text-cyan-100 transition hover:bg-cyan-400/30 disabled:cursor-not-allowed disabled:opacity-50"
+                className="inline-flex items-center gap-2 rounded-lg border border-amber-300/40 bg-amber-400/20 px-3 py-2 text-xs font-semibold text-amber-100 transition hover:bg-amber-400/30 disabled:cursor-not-allowed disabled:opacity-50"
               >
                 <RefreshCw size={12} className={isCalibrating ? "animate-spin" : ""} />
                 {isCalibrating ? "Calibrating..." : "Calibrate"}
