@@ -5,6 +5,7 @@ import Link from "next/link";
 import { Camera, ChevronLeft } from "lucide-react";
 import { Pose, POSE_CONNECTIONS, type Results } from "@mediapipe/pose";
 import { drawConnectors, drawLandmarks } from "@mediapipe/drawing_utils";
+import PostureErrorsPanel from "@/components/PostureErrorsPanel";
 import { loadSessions, saveSession } from "@/lib/biomechanics/storage";
 import type { AnalysisResult, RuleOutcome } from "@/lib/biomechanics/types";
 import MetricRow from "@/components/MetricRow";
@@ -55,6 +56,7 @@ const BODY_LANDMARK_INDEX_SET = new Set<number>(BODY_LANDMARK_INDICES);
 const BODY_POSE_CONNECTIONS = POSE_CONNECTIONS.filter(
   ([start, end]) => BODY_LANDMARK_INDEX_SET.has(start) && BODY_LANDMARK_INDEX_SET.has(end),
 );
+const VISIBILITY_THRESHOLD = 0.3;
 
 function round3(value: number): number {
   return Number(value.toFixed(3));
@@ -139,6 +141,39 @@ function drawJointAngle(
   ctx.fillText(text, tx + 1, ty + 1);
   ctx.fillStyle = "#ffffff";
   ctx.fillText(text, tx, ty);
+}
+
+function drawSkeletonOverlay(
+  ctx: CanvasRenderingContext2D,
+  landmarks: Landmark2D[],
+  width: number,
+  height: number,
+) {
+  const isVisibleAndInFrame = (index: number) => {
+    const lm = landmarks[index];
+    if (!lm) {
+      return false;
+    }
+    const visibility = lm.visibility ?? 1;
+    return visibility >= VISIBILITY_THRESHOLD && lm.x >= 0 && lm.x <= 1 && lm.y >= 0 && lm.y <= 1;
+  };
+
+  const filteredConnections = BODY_POSE_CONNECTIONS.filter(
+    ([start, end]) => isVisibleAndInFrame(start) && isVisibleAndInFrame(end),
+  );
+  const filteredBodyLandmarks = landmarks.filter(
+    (_, index) => BODY_LANDMARK_INDEX_SET.has(index) && isVisibleAndInFrame(index),
+  );
+
+  drawConnectors(ctx, landmarks, filteredConnections, {
+    color: "#f59e0b",
+    lineWidth: 3,
+  });
+  drawLandmarks(ctx, filteredBodyLandmarks, {
+    color: "#84cc16",
+    lineWidth: 1,
+    radius: 3,
+  });
 }
 
 function buildPayload(results: Results): AnalyzePayload | null {
@@ -339,19 +374,7 @@ export default function SportsLivePage() {
             setStatusText("Tracking landmarks live");
           }
 
-          drawConnectors(ctx, results.poseLandmarks, BODY_POSE_CONNECTIONS, {
-            color: "#f59e0b",
-            lineWidth: 3,
-          });
-          drawLandmarks(
-            ctx,
-            results.poseLandmarks.filter((_, index) => BODY_LANDMARK_INDEX_SET.has(index)),
-            {
-            color: "#84cc16",
-            lineWidth: 1,
-            radius: 3,
-            },
-          );
+          drawSkeletonOverlay(ctx, results.poseLandmarks, width, height);
 
           drawJointAngle(
             ctx,
@@ -397,6 +420,8 @@ export default function SportsLivePage() {
               void postForAnalysis(payload);
             }
           }
+        } else if (firstDetectionSeenRef.current) {
+          setStatusText("No body detected. Step back and keep full body in frame");
         }
 
         ctx.restore();
@@ -468,11 +493,12 @@ export default function SportsLivePage() {
   const elbowIssue = findErrorByText("elbow");
   const kneeIssue = findErrorByText("knee");
   const armIssue = findErrorByText("arm");
-  const riskLabel = currentErrors.some((e) => e.severity.toLowerCase().includes("high"))
-    ? "High"
-    : currentErrors.length >= 2
-      ? "Medium"
-      : "Low";
+  const hasLateralTilt = currentErrors.some((error) => {
+    const text = `${error.rule} ${error.message}`.toLowerCase();
+    return text.includes("lateral flexion") || text.includes("side bend") || text.includes("tilt");
+  });
+  const riskPercent = hasLateralTilt ? 88 : Math.max(8, Math.min(30, Math.round(22 - (postureScore - 80) * 0.6)));
+  const riskLabel = riskPercent >= 70 ? "High" : riskPercent >= 40 ? "Medium" : "Low";
   const riskStatus = riskLabel === "High" ? "error" : riskLabel === "Medium" ? "warning" : "correct";
 
   return (
@@ -493,7 +519,7 @@ export default function SportsLivePage() {
             <div className="relative mt-4 min-h-[420px] overflow-hidden rounded-2xl border border-slate-500/70 bg-slate-950/60 lg:min-h-[620px]">
               <div className={`absolute inset-0 ${isMirrored ? "-scale-x-100" : "scale-x-100"}`}>
                 <video ref={videoRef} muted playsInline className="h-full w-full object-fill" />
-                <canvas ref={canvasRef} className="pointer-events-none absolute inset-0 h-full w-full" />
+                <canvas ref={canvasRef} className="pointer-events-none absolute inset-0 z-10 h-full w-full" />
               </div>
               {!cameraReady && (
                 <div className="absolute inset-0 flex items-center justify-center bg-slate-950/70 px-6">
@@ -557,38 +583,31 @@ export default function SportsLivePage() {
 
             <div className="mt-5 space-y-3">
               <ProgressBar label="Movement Efficiency" value={Math.max(40, postureScore - 6)} color="green" />
-              <ProgressBar label="Injury Risk" value={riskLabel === "High" ? 82 : riskLabel === "Medium" ? 58 : 24} color={riskLabel === "High" ? "red" : riskLabel === "Medium" ? "yellow" : "green"} />
+              <ProgressBar label="Injury Risk" value={riskPercent} color={riskLabel === "High" ? "red" : riskLabel === "Medium" ? "yellow" : "green"} />
             </div>
 
             <div className="mt-4">
               <MetricRow label="Injury Risk" value={riskLabel} status={riskStatus} />
+            </div>
+
+            <div className="mt-4">
+              <PostureErrorsPanel
+                title="Live Error Window"
+                subtitle={latestResult ? "Latest analyzed frame window" : "Waiting for the first analysis result"}
+                errors={currentErrors}
+                emptyMessage="No posture errors in the latest analyzed frame."
+              />
             </div>
           </section>
         </div>
 
         <section className="glass-card mt-6 rounded-2xl p-5">
           <div className="flex flex-wrap items-center justify-between gap-3">
-            <h2 className="font-[var(--font-sora)] text-lg font-semibold text-slate-100">Error Log</h2>
+            <h2 className="font-[var(--font-sora)] text-lg font-semibold text-slate-100">Recent Sessions</h2>
             <Link href="/sports/sessions" className="text-sm text-blue-200 transition hover:text-blue-100">
               Open full history
             </Link>
           </div>
-
-          {currentErrors.length === 0 && (
-            <p className="mt-3 text-sm text-slate-300">No live posture errors in the current frame set.</p>
-          )}
-
-          {currentErrors.length > 0 && (
-            <div className="mt-4 space-y-3">
-              {currentErrors.map((error) => (
-                <article key={`${error.rule}-${error.message}`} className="rounded-xl border border-rose-400/30 bg-rose-500/10 p-3 text-sm">
-                  <p className="font-semibold text-rose-100">{error.rule}</p>
-                  <p className="mt-1 text-xs text-slate-200">{error.message}</p>
-                  <p className="mt-2 text-xs text-slate-300">value: {error.value} | expected: {error.expected} | severity: {error.severity}</p>
-                </article>
-              ))}
-            </div>
-          )}
 
           {history.length > 0 && (
             <div className="mt-5 rounded-xl border border-slate-700/70 bg-slate-900/45 p-4">

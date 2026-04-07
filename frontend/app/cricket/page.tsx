@@ -33,7 +33,12 @@ export default function CricketPage() {
   const elbowIssue = errorByKeyword("elbow");
   const kneeIssue = errorByKeyword("knee");
   const armIssue = errorByKeyword("arm");
-  const riskLabel = errors.some((e) => e.severity.toLowerCase().includes("high")) ? "High" : errors.length >= 2 ? "Medium" : "Low";
+  const hasLateralTilt = errors.some((error) => {
+    const text = `${error.rule} ${error.message}`.toLowerCase();
+    return text.includes("lateral flexion") || text.includes("side bend") || text.includes("tilt");
+  });
+  const riskPercent = hasLateralTilt ? 88 : Math.max(8, Math.min(30, Math.round(22 - (postureScore - 80) * 0.6)));
+  const riskLabel = riskPercent >= 70 ? "High" : riskPercent >= 40 ? "Medium" : "Low";
 
   return (
     <main className="dashboard-shell min-h-screen px-4 py-6 sm:px-6 md:px-10">
@@ -64,7 +69,7 @@ export default function CricketPage() {
 
               <div className="mt-5 space-y-3">
                 <ProgressBar label="Movement Efficiency" value={Math.max(40, postureScore - 6)} color="green" />
-                <ProgressBar label="Injury Risk" value={riskLabel === "High" ? 82 : riskLabel === "Medium" ? 58 : 24} color={riskLabel === "High" ? "red" : riskLabel === "Medium" ? "yellow" : "green"} />
+                <ProgressBar label="Injury Risk" value={riskPercent} color={riskLabel === "High" ? "red" : riskLabel === "Medium" ? "yellow" : "green"} />
               </div>
             </section>
           </section>
