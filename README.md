@@ -239,3 +239,116 @@ git commit -m "your message"
 git push
 ```
 
+## 13. Rule-Based Sports Biomechanics Analyzer
+
+The Sports module now includes a frontend-only, rule-based cricket analysis engine.
+
+What it does:
+
+- Takes normalized keypoints (`0` to `1`) as posture input
+- Runs deterministic biomechanical checks (no machine learning training)
+- Detects posture errors with expected ranges and severity
+- Saves sessions to browser LocalStorage (no external database)
+- Displays live feedback and session history in the UI
+
+Routes:
+
+- `/sports`: Sports landing page
+- `/sports/live`: Cricket live analysis page with "Start Analysis"
+- `/sports/sessions`: Session history panel from LocalStorage
+
+Core frontend files:
+
+- `frontend/lib/biomechanics/types.ts`
+- `frontend/lib/biomechanics/utils.ts`
+- `frontend/lib/biomechanics/rules.ts`
+- `frontend/lib/biomechanics/engine.ts`
+- `frontend/lib/biomechanics/storage.ts`
+- `frontend/lib/biomechanics/sampleData.ts`
+
+Implemented cricket rules:
+
+- Elbow Angle (`shoulder-elbow-wrist`, error if `< 165 deg`)
+- Front Knee Alignment (`right_knee_x` expected `0.50 - 0.53`)
+- Cross-Base Alignment (foot line vs shoulder line)
+- Lateral Flexion (spine tilt expected `<= 20 deg`)
+- Hip-Shoulder Separation (`20 - 45 deg`, warning/error bands)
+
+Utility functions included:
+
+- `calculateAngle(A, B, C)`
+- `calculateSlope(A, B)`
+- `calculateBodyTilt(hip, neck)`
+- `calculateAlignment(line1, line2)`
+
+LocalStorage schema:
+
+```json
+{
+	"sessions": [
+		{
+			"timestamp": "2026-04-06T19:00:00",
+			"exercise": "cricket_bowling",
+			"errors": [
+				{
+					"rule": "Front Knee Alignment",
+					"value": 0.48,
+					"expected": "0.50 - 0.53",
+					"severity": "medium",
+					"message": "Front knee misaligned"
+				}
+			]
+		}
+	]
+}
+```
+
+Sample posture datasets for testing are provided in:
+
+- `correctCricketPosture`
+- `incorrectCricketPosture`
+
+Both are available from `frontend/lib/biomechanics/sampleData.ts` and can be switched on `/sports/live` before running analysis.
+
+## 14. Live Camera + MediaPipe Sports Mode
+
+Sports live mode now runs fully in-browser camera capture and MediaPipe pose detection.
+
+Flow:
+
+- Open `/sports`
+- Click Cricket
+- Camera starts automatically on `/sports/live`
+- Pose skeleton is drawn on canvas overlay
+- Every 5th frame sends normalized keypoints to FastAPI `/analyze`
+- Backend returns rule violations and UI updates live feedback and session history
+
+Backend API file:
+
+- `sports_api.py`
+
+Run sports backend (FastAPI):
+
+```powershell
+./run_sports_backend.ps1
+```
+
+or:
+
+```powershell
+python -m uvicorn sports_api:app --host 0.0.0.0 --port 8001 --reload
+```
+
+Run frontend:
+
+```powershell
+cd frontend
+npm run dev
+```
+
+Optional frontend env variable:
+
+```bash
+NEXT_PUBLIC_SPORTS_API_BASE=http://127.0.0.1:8001
+```
+

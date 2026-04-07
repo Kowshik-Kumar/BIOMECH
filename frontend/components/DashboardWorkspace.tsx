@@ -34,7 +34,7 @@ export default function DashboardWorkspace() {
         <OverviewCard
           title="Sports Training"
           description="Monitor technique quality, angular consistency, and rep progression during athletic drills."
-          href="/sports/live"
+          href="/sports"
           cta="Open Sports Live"
         />
         <OverviewCard

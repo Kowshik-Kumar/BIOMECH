@@ -1,5 +1,6 @@
 import Link from "next/link";
 import { Activity, FolderKanban, Gauge, HeartPulse, Settings } from "lucide-react";
+import type { LucideIcon } from "lucide-react";
 
 type SidebarProps = {
   activeKey: "dashboard" | "sports" | "rehab" | "sessions" | "settings";
@@ -9,13 +10,13 @@ type MenuItem = {
   key: SidebarProps["activeKey"];
   label: string;
   href: string;
-  icon: React.ComponentType<{ size?: number; className?: string }>;
+  icon: LucideIcon;
 };
 
 const MENU_ITEMS: MenuItem[] = [
   { key: "dashboard", label: "Dashboard", href: "/", icon: Gauge },
-  { key: "sports", label: "Sports Training", href: "/sports/live", icon: Activity },
-  { key: "rehab", label: "Injury Rehabilitation", href: "/rehabilitation", icon: HeartPulse },
+  { key: "sports", label: "Sports Training", href: "/cricket", icon: Activity },
+  { key: "rehab", label: "Injury Rehabilitation", href: "/rehab", icon: HeartPulse },
   { key: "sessions", label: "Sessions", href: "/sports/sessions", icon: FolderKanban },
   { key: "settings", label: "Settings", href: "#", icon: Settings },
 ];
